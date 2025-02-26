@@ -1,3 +1,4 @@
+use std::error;
 use std::fs;
 use std::path::PathBuf;
 
@@ -12,15 +13,25 @@ impl Cask {
         }
     }
 
-    pub fn open(dir_path: &str) -> Result<Cask, &str> {
+    pub fn open(dir_path: &str) -> Result<Cask, Box<dyn error::Error>> {
         match fs::exists(dir_path) {
             Ok(true) => Ok(Self::new(dir_path)),
             Ok(false) => {
-                let _ = fs::create_dir(dir_path);
+                Self::create_dir(dir_path).unwrap();
                 Ok(Self::new(dir_path))
             }
-            Err(_) => Err("Cannot create directory"),
+            Err(error) => Err(Box::new(error)),
         }
+    }
+
+    fn create_dir(dir_path: &str) -> Result<(), Box<dyn error::Error>> {
+        let dir_path = PathBuf::from(dir_path);
+        let data_filename = dir_path.join("0.log");
+
+        fs::create_dir(dir_path)?;
+        fs::File::create(data_filename)?;
+
+        Ok(())
     }
 
     pub fn merge(_dir_path: &str) -> Result<(), &str> {
@@ -63,6 +74,17 @@ mod tests {
         assert_eq!(db.dir_path.as_os_str(), dir_path);
         assert_eq!(fs::exists(dir_path).unwrap(), true);
 
+        fs::remove_dir(dir_path).unwrap_or(());
+    }
+
+    #[test]
+    fn test_open_initializes_data_file_on_empty_dir() {
+        let dir_path = "/tmp/sample_dir1";
+
+        fs::remove_dir(dir_path).unwrap_or(());
+        let db = Cask::open(dir_path).unwrap();
+
+        assert_eq!(fs::exists(db.dir_path.join("0.log")).unwrap(), true);
         fs::remove_dir(dir_path).unwrap_or(());
     }
 }
