@@ -72,54 +72,47 @@ impl Cask {
 mod tests {
     use crate::rustycask::store::Cask;
     use std::fs;
+    use tempfile::tempdir;
 
     #[test]
     fn test_open_creates_dir_when_missing() {
-        let dir_path = "/tmp/sample_dir";
-
-        fs::remove_dir_all(dir_path).unwrap_or(());
+        let temp_dir = tempdir().unwrap();
+        let dir_path = temp_dir.path().to_str().unwrap();
         let db = Cask::open(dir_path).unwrap();
 
         assert_eq!(db.dir_path.as_os_str(), dir_path);
         assert_eq!(fs::exists(dir_path).unwrap(), true);
-
-        fs::remove_dir_all(dir_path).unwrap_or(());
     }
 
     #[test]
     fn test_open_initializes_data_file_on_empty_dir() {
-        let dir_path = "/tmp/sample_dir1";
-
-        fs::remove_dir_all(dir_path).unwrap_or(());
+        let temp_dir = tempdir().unwrap();
+        let dir_path = temp_dir.path().to_str().unwrap();
         let db = Cask::open(dir_path).unwrap();
-
         assert_eq!(db.active_file_id, 0);
-        fs::remove_dir_all(dir_path).unwrap();
     }
 
     #[test]
     fn test_put_writes_data_to_log_file() {
-        let dir_path = "/tmp/sample_dir2";
+        let temp_dir = tempdir().unwrap();
+        let dir_path = temp_dir.path().to_str().unwrap();
 
-        fs::remove_dir_all(dir_path).unwrap_or(());
         let mut db = Cask::open(dir_path).unwrap();
         let _ = db.put(b"key", b"value");
 
         let log_file_metadata = fs::metadata(db.dir_path.join("0.log")).unwrap();
         let log_file_size = log_file_metadata.len();
         assert!(log_file_size > 0, "expected > 0, got 0");
-        fs::remove_dir_all(dir_path).unwrap_or(());
     }
 
     #[test]
     fn test_put_appends_data_to_log_file() {
-        let dir_path = "/tmp/sample_dir3";
+        let temp_dir = tempdir().unwrap();
+        let dir_path = temp_dir.path().to_str().unwrap();
 
-        fs::remove_dir_all(dir_path).unwrap_or(());
         let mut db = Cask::open(dir_path).unwrap();
 
         assert!(db.put(b"key", b"value").unwrap() == ());
         assert!(db.put(b"key", b"value2").unwrap() == ());
-        fs::remove_dir_all(dir_path).unwrap_or(());
     }
 }
