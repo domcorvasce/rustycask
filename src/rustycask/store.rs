@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Seek, Write};
+use std::os::unix::fs::FileExt;
 use std::path::PathBuf;
 use std::{error, fs};
 
@@ -87,6 +88,23 @@ impl Cask {
 
         Ok(())
     }
+
+    pub fn get(&mut self, key: &str) -> Option<String> {
+        match self.keydir.get(&String::from(key)) {
+            Some(keydir_entry) => {
+                let desired_position = keydir_entry.value_pos + 16 + key.len() as u64;
+                let mut buffer = vec![0u8; keydir_entry.value_size as usize];
+
+                self.active_file
+                    .read_exact_at(&mut buffer, desired_position)
+                    .unwrap();
+
+                let value = std::str::from_utf8(&buffer).unwrap();
+                Some(value.into())
+            }
+            None => None,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -159,5 +177,39 @@ mod tests {
                 value_pos: 24
             }
         );
+    }
+
+    #[test]
+    fn test_get_returns_none_on_missing_key() {
+        let temp_dir = tempdir().unwrap();
+        let dir_path = temp_dir.path().to_str().unwrap();
+
+        let mut db = Cask::open(dir_path).unwrap();
+        let _ = db.put("key", "value");
+
+        let value = db.get("key2");
+        assert_eq!(value.is_some(), false);
+    }
+
+    #[test]
+    fn test_get_reads_value() {
+        let temp_dir = tempdir().unwrap();
+        let dir_path = temp_dir.path().to_str().unwrap();
+
+        let mut db = Cask::open(dir_path).unwrap();
+        let _ = db.put("key", "value");
+        let _ = db.put("key", "value2");
+
+        let value = db.get("key");
+        assert_eq!(value.is_some(), true);
+        assert_eq!(value.unwrap(), String::from("value2"));
+
+        let _ = db.put("key2", "value");
+        let value = db.get("key2");
+        assert_eq!(value.unwrap(), String::from("value"));
+
+        let value = db.get("key");
+        assert_eq!(value.is_some(), true);
+        assert_eq!(value.unwrap(), String::from("value2"));
     }
 }
