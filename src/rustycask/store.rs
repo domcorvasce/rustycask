@@ -1,14 +1,23 @@
+use std::collections::HashMap;
 use std::fs::File;
-use std::io::Write;
+use std::io::{Seek, Write};
 use std::path::PathBuf;
 use std::{error, fs};
 
 const LOG_EXTENSION: &str = "log";
 
+#[derive(Debug, PartialEq)]
+pub(crate) struct KeydirEntry {
+    file_id: u64,
+    value_size: u64,
+    value_pos: u64,
+}
+
 pub struct Cask {
     dir_path: PathBuf,
     active_file_id: u64,
     active_file: File,
+    keydir: HashMap<String, KeydirEntry>,
 }
 
 impl Cask {
@@ -42,6 +51,7 @@ impl Cask {
             dir_path: dir_path,
             active_file_id: active_file_id,
             active_file: active_file,
+            keydir: HashMap::new(),
         }
     }
 
@@ -57,12 +67,23 @@ impl Cask {
         }
     }
 
-    pub fn put(&mut self, key: &[u8], value: &[u8]) -> Result<(), Box<dyn error::Error>> {
+    pub fn put(&mut self, key: &str, value: &str) -> Result<(), Box<dyn error::Error>> {
+        let value_pos = self.active_file.stream_position().unwrap();
+
         self.active_file.write_all(&key.len().to_be_bytes())?;
         self.active_file.write_all(&value.len().to_be_bytes())?;
-        self.active_file.write_all(key)?;
-        self.active_file.write_all(value)?;
+        self.active_file.write_all(key.as_bytes())?;
+        self.active_file.write_all(value.as_bytes())?;
         self.active_file.flush()?;
+
+        self.keydir.insert(
+            String::from(key),
+            KeydirEntry {
+                file_id: self.active_file_id,
+                value_pos,
+                value_size: value.len() as u64,
+            },
+        );
 
         Ok(())
     }
@@ -70,7 +91,7 @@ impl Cask {
 
 #[cfg(test)]
 mod tests {
-    use crate::rustycask::store::Cask;
+    use crate::rustycask::store::{Cask, KeydirEntry};
     use std::fs;
     use tempfile::tempdir;
 
@@ -81,7 +102,7 @@ mod tests {
         let db = Cask::open(dir_path).unwrap();
 
         assert_eq!(db.dir_path.as_os_str(), dir_path);
-        assert_eq!(fs::exists(dir_path).unwrap(), true);
+        assert!(fs::exists(dir_path).unwrap_or(false));
     }
 
     #[test]
@@ -89,6 +110,7 @@ mod tests {
         let temp_dir = tempdir().unwrap();
         let dir_path = temp_dir.path().to_str().unwrap();
         let db = Cask::open(dir_path).unwrap();
+
         assert_eq!(db.active_file_id, 0);
     }
 
@@ -98,7 +120,7 @@ mod tests {
         let dir_path = temp_dir.path().to_str().unwrap();
 
         let mut db = Cask::open(dir_path).unwrap();
-        let _ = db.put(b"key", b"value");
+        let _ = db.put("key", "value");
 
         let log_file_metadata = fs::metadata(db.dir_path.join("0.log")).unwrap();
         let log_file_size = log_file_metadata.len();
@@ -112,7 +134,30 @@ mod tests {
 
         let mut db = Cask::open(dir_path).unwrap();
 
-        assert!(db.put(b"key", b"value").unwrap() == ());
-        assert!(db.put(b"key", b"value2").unwrap() == ());
+        assert!(db.put("key", "value").is_ok());
+        assert!(db.put("key", "value2").is_ok());
+    }
+
+    #[test]
+    fn test_put_updates_keydir() {
+        let temp_dir = tempdir().unwrap();
+        let dir_path = temp_dir.path().to_str().unwrap();
+
+        let mut db = Cask::open(dir_path).unwrap();
+        let _ = db.put("key", "value");
+        let _ = db.put("key", "value2");
+
+        let keydir_entry = db.keydir.get("key");
+        assert_eq!(keydir_entry.is_some(), true);
+
+        let value_pointer = keydir_entry.unwrap();
+        assert_eq!(
+            value_pointer,
+            &KeydirEntry {
+                file_id: 0,
+                value_size: 6,
+                value_pos: 24
+            }
+        );
     }
 }
